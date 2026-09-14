@@ -181,16 +181,13 @@ print("\n" + "=" * 50)
 print("EWALUACJA MODELU NA LOKALNYM ZBIORZE WALIDACYJNYM")
 print("=" * 50)
 
-# Przygotowanie danych walidacyjnych własnej bazy (normalizacja i one-hot)
 x_val_local_norm = x_val_local / 255.0
 y_val_local_cat = keras.utils.to_categorical(y_val_local_shifted, num_classes=len(all_class_names))
 
-# Wywołanie evaluate wyłącznie dla lokalnej bazy
 local_loss, local_acc = model.evaluate(x_val_local_norm, y_val_local_cat, verbose=0)
 print(f"Strata (Loss) na własnej bazie:       {local_loss:.4f}")
 print(f"Dokładność (Accuracy) na własnej bazie: {local_acc * 100:.2f}%")
 
-# Wyliczenie macierzy błędów/szczegółów
 preds_local = model.predict(x_val_local_norm, verbose=0)
 pred_labels_local = np.argmax(preds_local, axis=1)
 
