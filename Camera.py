@@ -34,12 +34,10 @@ while True:
             cv2.BORDER_CONSTANT, value=0
         )
 
-        # 5. Dopasowanie do formatu 28x28
         img = cv2.resize(roi_padded, (28, 28))
         img = img.astype(np.float32) / 255.0
-        img = np.expand_dims(img, axis=(0, -1))  # Kształt: (1, 28, 28, 1)
+        img = np.expand_dims(img, axis=(0, -1))
 
-        # 6. Predykcja właściwym modelem (model_learned, a nie nazwa pliku json!)
         predictions = model_learned.predict(img, verbose=0)
         idx_label = np.argmax(predictions)
         confidence = np.max(predictions)
@@ -50,7 +48,7 @@ while True:
             best_label = model_classes[idx_label]
             label = f"{best_label} ({confidence * 100:.0f}%)"
 
-            color = (0, 255, 0)  # Zielona ramka
+            color = (0, 255, 0)
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
             cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 

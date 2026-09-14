@@ -6,7 +6,7 @@ import tensorflow as tf
 from keras import Sequential, Input
 import keras.layers
 from keras.src.layers import BatchNormalization, GaussianNoise, RandomRotation, RandomZoom, RandomContrast, \
-    RandomBrightness, Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+    RandomBrightness, Conv2D, MaxPooling2D, Flatten, Dense, Dropout, RandomTranslation, RandomShear
 from matplotlib import pyplot as plt
 from sklearn.utils.class_weight import compute_class_weight
 
@@ -37,27 +37,81 @@ validation_my_ds = keras.utils.image_dataset_from_directory(
 
 mydb_class_names = train_my_ds.class_names
 
-def dataset_to_numpy(ds):
+
+def clean_and_center_image(img_raw):
+    # img_raw wchodzący z datasetu ma kształt (64, 64, 1) lub (64, 64)
+    if len(img_raw.shape) == 3:
+        img_raw = img_raw.squeeze()
+
+    img_uint8 = img_raw.astype(np.uint8)
+
+    # 1. Jeśli tło jest jasne -> odwróć na czarne
+    if np.mean(img_uint8) > 127:
+        img_uint8 = 255 - img_uint8
+
+    # 2. Binarizacja (Otsu)
+    _, thresh = cv2.threshold(img_uint8, 30, 255, cv2.THRESH_BINARY)
+
+    # 3. Usuwanie małego szumu / kropek na krawędziach
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thresh)
+    clean_thresh = np.zeros_like(thresh)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] > 40:  # Ignoruj śmieci mniejsze niż 40 px
+            clean_thresh[labels == i] = 255
+
+    # 4. Wycięcie samego symbolu (Bounding Box)
+    contours, _ = cv2.findContours(clean_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        c = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(c)
+        crop = clean_thresh[y:y + h, x:x + w]
+    else:
+        crop = clean_thresh
+
+    # 5. Centrowanie na kwadratowej tarczy
+    h, w = crop.shape
+    max_dim = max(h, w)
+    square = np.zeros((max_dim, max_dim), dtype=np.uint8)
+
+    y_offset = (max_dim - h) // 2
+    x_offset = (max_dim - w) // 2
+    square[y_offset:y_offset + h, x_offset:x_offset + w] = crop
+
+    # 6. Dodanie marginesu i przeskalowanie do (64, 64)
+    margin = int(max_dim * 0.30)
+    padded = cv2.copyMakeBorder(square, margin, margin, margin, margin, cv2.BORDER_CONSTANT, value=0)
+    resized = cv2.resize(padded, (64, 64), interpolation=cv2.INTER_AREA)
+
+    return resized[..., None].astype(np.float32)
+
+
+def dataset_to_numpy_cleaned(ds):
     x_list, y_list = [], []
     for images, labels in ds:
-        x_list.append(images.numpy())
-        y_list.append(labels.numpy())
-    return np.vstack(x_list), np.concatenate(y_list)
+        imgs_np = images.numpy()
+        labels_np = labels.numpy()
 
-x_train_local, y_train_local = dataset_to_numpy(train_my_ds)
-x_val_local, y_val_local = dataset_to_numpy(validation_my_ds)
+        # Czyszczenie każdego obrazu w batchu
+        for i in range(len(imgs_np)):
+            cleaned_img = clean_and_center_image(imgs_np[i])
+            x_list.append(cleaned_img)
+            y_list.append(labels_np[i])
 
-x_train_local = 255.0 - x_train_local
-x_val_local = 255.0 - x_val_local
+    return np.array(x_list), np.array(y_list)
+
+x_train_local, y_train_local = dataset_to_numpy_cleaned(train_my_ds)
+x_val_local, y_val_local = dataset_to_numpy_cleaned(validation_my_ds)
 
 augmentation = Sequential([
         Input(shape=(64, 64, 1)),
         # RandomFlip("horizontal"),
-        RandomRotation(0.03),
-        RandomZoom(0.2, fill_mode="nearest"),
+        RandomTranslation(height_factor=0.08, width_factor=0.08, fill_mode="constant", fill_value=0),
+        RandomRotation(0.05),
+        RandomShear(x_factor=0.1, y_factor=0.1, fill_mode="constant", fill_value=0),
+        RandomZoom(height_factor=(-0.08, 0.08), width_factor=(-0.08, 0.08), fill_mode="constant", fill_value=0),
         RandomContrast(0.4),
         RandomBrightness(factor=(-0.3,0.3)),
-        GaussianNoise(stddev=0.05)
+        GaussianNoise(stddev=0.02)
     ])
 def augment_data(x_data, y_data, factor=30):
     aug_x, aug_y = [x_data], [y_data]
@@ -66,12 +120,12 @@ def augment_data(x_data, y_data, factor=30):
         aug_x.append(augmented_images)
         aug_y.append(y_data)
     return np.vstack(aug_x), np.concatenate(aug_y)
-x_train_local_aug, y_train_local_aug = augment_data(x_train_local, y_train_local, factor=10)
+x_train_local_aug, y_train_local_aug = augment_data(x_train_local, y_train_local, factor=100)
 
 (x_mnist_train, y_mnist_train), (x_mnist_val, y_mnist_val) = keras.datasets.mnist.load_data()
 mnist_classes = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
-def limit_mnist_class_size(x_mnist, y_mnist, max_samples_per_class=6000):
+def limit_mnist_class_size(x_mnist, y_mnist, max_samples_per_class=5000):
     x_limited, y_limited = [], []
     for cls in range(10):
         indices = np.where(y_mnist == cls)[0]
@@ -84,7 +138,7 @@ def limit_mnist_class_size(x_mnist, y_mnist, max_samples_per_class=6000):
         y_limited.append(y_mnist[selected_indices])
 
     return np.vstack(x_limited), np.concatenate(y_limited)
-x_mnist_train, y_mnist_train = limit_mnist_class_size(x_mnist_train, y_mnist_train, max_samples_per_class=6000)
+x_mnist_train, y_mnist_train = limit_mnist_class_size(x_mnist_train, y_mnist_train, max_samples_per_class=5000)
 
 x_mnist_train = x_mnist_train[..., None].astype("float32")
 x_mnist_val = x_mnist_val[..., None].astype("float32")
@@ -133,14 +187,14 @@ model = Sequential([
     MaxPooling2D((2, 2)),
     Flatten(),
     # Dense(128, activation='relu'),
-    # Dense(256, activation='relu'),
-    Dropout(0.5),
+    Dense(256, activation='relu'),
+    Dropout(0.4),
     Dense(128, activation='relu'),
-    # Dropout(0.4),
-    Dense(38, activation='softmax')
+    Dropout(0.3),
+    Dense(len(all_class_names), activation='softmax')
 ])
 
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
 
 es = keras.callbacks.EarlyStopping(
     monitor='val_loss',
@@ -209,8 +263,19 @@ print(f"Strata (Loss) na MNIST:               {mnist_loss:.4f}")
 print(f"Dokładność (Accuracy) na MNIST:         {mnist_acc * 100:.2f}%")
 print("=" * 50 + "\n")
 
-def prepare_digit_roi(img_raw):
-    _, thresh = cv2.threshold(img_raw, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+def prepare_digit_roi(img_color_or_gray):
+    if len(img_color_or_gray.shape) == 3:
+        hsv = cv2.cvtColor(img_color_or_gray, cv2.COLOR_BGR2HSV)
+        gray = hsv[:, :, 1]
+    else:
+        gray = img_color_or_gray
+
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    kernel = np.ones((3, 3), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
 
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
@@ -220,20 +285,18 @@ def prepare_digit_roi(img_raw):
     else:
         crop = thresh
 
-    # kernel = np.ones((2, 2), np.uint8)
-    # crop = cv2.dilate(crop, kernel, iterations=1)
+    crop = cv2.dilate(crop, kernel, iterations=1)
 
-    # h, w = crop.shape
-    # if h > w:
-    #     pad = (h - w) // 2
-    #     square = cv2.copyMakeBorder(crop, 0, 0, pad, pad, cv2.BORDER_CONSTANT, value=0)
-    # else:
-    #     pad = (w - h) // 2
-    #     square = cv2.copyMakeBorder(crop, pad, pad, 0, 0, cv2.BORDER_CONSTANT, value=0)
+    h, w = crop.shape
+    max_dim = max(h, w)
+    square = np.zeros((max_dim, max_dim), dtype=np.uint8)
 
-    # 5. Dodanie 20% czarnego marginesu (klucz do rozpoznania przez MNIST!)
-    margin = int(crop.shape[0] * 0.20)
-    padded = cv2.copyMakeBorder(crop, margin, margin, margin, margin, cv2.BORDER_CONSTANT, value=0)
+    y_offset = (max_dim - h) // 2
+    x_offset = (max_dim - w) // 2
+    square[y_offset:y_offset + h, x_offset:x_offset + w] = crop
+
+    margin = int(max_dim * 0.35)
+    padded = cv2.copyMakeBorder(square, margin, margin, margin, margin, cv2.BORDER_CONSTANT, value=0)
 
     resized = cv2.resize(padded, (64, 64), interpolation=cv2.INTER_AREA)
     normalized = resized.astype('float32') / 255.0
@@ -258,12 +321,10 @@ for i in range(10):
 
 print("=" * 40 + "\n")
 
-IMAGE_PATH = "assets/e.png"
+IMAGE_PATH = "assets/rys_1.1.png"
 img_raw = cv2.imread(IMAGE_PATH, cv2.IMREAD_GRAYSCALE)
-(thresh, img_bw) = cv2.threshold(img_raw, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-
-if img_bw is not None:
+if img_raw is not None:
     digit_tensor = prepare_digit_roi(img_raw)
 
     print(f"Shape tensora: {digit_tensor.shape}")
