@@ -8,6 +8,8 @@ from keras.layers import (
     Flatten,
     Dense,
 )
+from keras.src.layers import BatchNormalization, Dropout
+
 import Database_merge
 
 train_dataset, test_dataset, all_class_names = Database_merge.merging_datasets()

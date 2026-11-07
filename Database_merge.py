@@ -26,7 +26,7 @@ def preprocess_mnist(image, label):
 
 def merging_datasets():
     symbol_train = tf.keras.utils.image_dataset_from_directory(
-        directory="assets/database/",
+        directory="assets/fliped_database/",
         labels='inferred',
         label_mode='int',
         color_mode='grayscale',
@@ -38,7 +38,7 @@ def merging_datasets():
         seed=123,
     )
     symbol_test = tf.keras.utils.image_dataset_from_directory(
-        directory="assets/database/",
+        directory="assets/fliped_database/",
         labels='inferred',
         label_mode='int',
         color_mode='grayscale',
@@ -73,9 +73,7 @@ def merging_datasets():
 
     (x_mnist_train, y_mnist_train), (x_mnist_test, y_mnist_test) = keras.datasets.mnist.load_data()
 
-
-
-    x_mnist_train, y_mnist_train = limit_mnist_class_size(x_mnist_train, y_mnist_train, max_samples_per_class=200)
+    x_mnist_train, y_mnist_train = limit_mnist_class_size(x_mnist_train, y_mnist_train, max_samples_per_class=350)
 
     mnist_train_dataset = tf.data.Dataset.from_tensor_slices(
         (x_mnist_train, y_mnist_train)
