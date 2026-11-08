@@ -10,7 +10,7 @@ model = keras.models.load_model("assets/learning_output/full_model.keras")
 with open("assets/learning_output/class_names.json", "r", encoding="utf-8") as f:
   all_class_names = json.load(f)
 
-IMAGE_PATH = "assets/rys_+.1.png"
+IMAGE_PATH = "assets/e.png"
 img_raw = cv2.imread(IMAGE_PATH, cv2.IMREAD_GRAYSCALE)
 if img_raw is not None:
     (thresh, img_bw) = cv2.threshold(img_raw, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
